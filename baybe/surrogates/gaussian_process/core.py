@@ -16,10 +16,12 @@ from baybe.searchspace.core import SearchSpace
 from baybe.surrogates.base import Surrogate
 from baybe.surrogates.gaussian_process.components.generic import to_component_factory
 from baybe.surrogates.gaussian_process.components.kernel import (
-    KernelFactory,
+    KernelFactoryProtocol,
 )
-from baybe.surrogates.gaussian_process.components.likelihood import LikelihoodFactory
-from baybe.surrogates.gaussian_process.components.mean import MeanFactory
+from baybe.surrogates.gaussian_process.components.likelihood import (
+    LikelihoodFactoryProtocol,
+)
+from baybe.surrogates.gaussian_process.components.mean import MeanFactoryProtocol
 from baybe.surrogates.gaussian_process.presets import (
     GaussianProcessPreset,
 )
@@ -108,7 +110,7 @@ class GaussianProcessSurrogate(Surrogate):
     supports_transfer_learning: ClassVar[bool] = True
     # See base class.
 
-    kernel_factory: KernelFactory = field(
+    kernel_factory: KernelFactoryProtocol = field(
         alias="kernel_or_factory",
         factory=DefaultKernelFactory,
         converter=to_component_factory,
@@ -121,7 +123,7 @@ class GaussianProcessSurrogate(Surrogate):
         * :class:`gpytorch.kernels.Kernel`
     """
 
-    mean_factory: MeanFactory = field(
+    mean_factory: MeanFactoryProtocol = field(
         alias="mean_or_factory",
         factory=DefaultMeanFactory,
         converter=to_component_factory,
@@ -133,7 +135,7 @@ class GaussianProcessSurrogate(Surrogate):
         * :class:`gpytorch.means.Mean`
     """
 
-    likelihood_factory: LikelihoodFactory = field(
+    likelihood_factory: LikelihoodFactoryProtocol = field(
         alias="likelihood_or_factory",
         factory=DefaultLikelihoodFactory,
         converter=to_component_factory,
