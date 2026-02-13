@@ -9,21 +9,24 @@ import numpy as np
 from attrs import define
 from typing_extensions import override
 
+from baybe.exceptions import IncompatibleSearchSpaceError
 from baybe.kernels.basic import MaternKernel
-from baybe.kernels.composite import ScaleKernel
-from baybe.parameters import TaskParameter
-from baybe.parameters.fidelity import (
-    CategoricalFidelityParameter,
-    NumericalDiscreteFidelityParameter,
+from baybe.kernels.composite import (
+    ScaleKernel,
+    SeperableProductKernel,
 )
 from baybe.priors.basic import GammaPrior
 from baybe.surrogates.gaussian_process.kernel_factory import KernelFactory
+from baybe.surrogates.gaussian_process.presets.fidelity import (
+    DefaultFidelityKernelFactory,
+    DefaultTaskKernelFactory,
+)
 
 if TYPE_CHECKING:
     from torch import Tensor
 
     from baybe.kernels.base import Kernel
-    from baybe.searchspace.core import SearchSpace
+    from baybe.searchspace.core import SearchSpace, SearchSpaceTaskType
 
 # Boundaries for low and high dimension limits
 _DIM_LIMITS = (8, 75)
@@ -31,6 +34,42 @@ _DIM_LIMITS = (8, 75)
 
 @define
 class DefaultKernelFactory(KernelFactory):
+    """Dispatcher class for the default kernel factory.
+
+    Distinguishes between single-task, transfer-learning and multi-fidelity
+    settings.
+    """
+
+    @override
+    def __call__(
+        self, searchspace: SearchSpace, train_x: Tensor, train_y: Tensor
+    ) -> Kernel:
+        base_kernel = DefaultDesignKernelFactory()
+
+        if searchspace.task_type is SearchSpaceTaskType.SINGLETASK:
+            covar_kernel = base_kernel
+
+        elif searchspace.task_type is SearchSpaceTaskType.CATEGORICALFIDELITY:
+            fidelity_kernel = DefaultFidelityKernelFactory()
+
+            covar_kernel = SeperableProductKernel((base_kernel, fidelity_kernel))
+
+        elif searchspace.task_type is SearchSpaceTaskType.CATEGORICALTASK:
+            task_module = DefaultTaskKernelFactory()
+
+            covar_kernel = SeperableProductKernel((base_kernel, task_module))
+
+        else:
+            raise IncompatibleSearchSpaceError(
+                f"Search space task type {searchspace.task_type} cannot be used with"
+                f"default kernel factory."
+            )
+
+        return covar_kernel
+
+
+@define
+class DefaultDesignKernelFactory(KernelFactory):
     """A factory providing the default kernel for Gaussian process surrogates.
 
     This is taking the low and high dimensional limits of
@@ -42,19 +81,8 @@ class DefaultKernelFactory(KernelFactory):
     def __call__(
         self, searchspace: SearchSpace, train_x: Tensor, train_y: Tensor
     ) -> Kernel:
-        effective_dims = train_x.shape[-1] - len(
-            [
-                p
-                for p in searchspace.parameters
-                if isinstance(
-                    p,
-                    (
-                        TaskParameter,
-                        CategoricalFidelityParameter,
-                        NumericalDiscreteFidelityParameter,
-                    ),
-                )
-            ]
+        effective_dims = (
+            train_x.shape[-1] - searchspace.n_fidelities - searchspace.n_tasks
         )
 
         # Interpolate prior moments linearly between low D and high D regime

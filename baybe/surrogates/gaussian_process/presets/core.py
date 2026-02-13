@@ -28,14 +28,10 @@ def make_gp_from_preset(preset: GaussianProcessPreset) -> Surrogate:
     from baybe.surrogates.gaussian_process.core import GaussianProcessSurrogate
     from baybe.surrogates.gaussian_process.multi_fidelity import (
         GaussianProcessSurrogateSTMF,
-        MultiFidelityGaussianProcessSurrogate,
     )
 
     if preset is GaussianProcessPreset.BAYBE:
         return GaussianProcessSurrogate()
-
-    if preset is GaussianProcessPreset.MFGP:
-        return MultiFidelityGaussianProcessSurrogate()
 
     if preset is GaussianProcessPreset.BOTORCH_STMF:
         return GaussianProcessSurrogateSTMF()

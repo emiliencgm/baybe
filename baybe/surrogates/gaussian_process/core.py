@@ -9,8 +9,9 @@ from attrs import define, field
 from attrs.validators import instance_of
 from typing_extensions import override
 
+from baybe.kernels.composite import SeperableProductKernel
 from baybe.parameters.base import Parameter
-from baybe.searchspace.core import SearchSpace
+from baybe.searchspace.core import SearchSpace, SearchSpaceTaskType
 from baybe.surrogates.base import Surrogate
 from baybe.surrogates.gaussian_process.kernel_factory import (
     KernelFactory,
@@ -34,14 +35,17 @@ if TYPE_CHECKING:
     from torch import Tensor
 
 
-# TODO Jordan MHS: _ModelContext is used by fidelity surrogate models now so may deserve
-# its own file.
 @define
 class _ModelContext:
     """Model context for :class:`GaussianProcessSurrogate`."""
 
     searchspace: SearchSpace = field(validator=instance_of(SearchSpace))
     """The search space the model is trained on."""
+
+    @property
+    def task_type(self) -> SearchSpaceTaskType:
+        """The type of task or fidelity parameter in the searchspace."""
+        return self.searchspace.task_type
 
     @property
     def task_idx(self) -> int | None:
@@ -72,8 +76,8 @@ class _ModelContext:
 
     @property
     def is_multi_fidelity(self) -> bool:
-        """Are there any fidelity dimensions?"""
-        return self.n_fidelity_dimensions > 0
+        """Indicates if model is to be operated in a multi-fidelity context."""
+        return self.searchspace.n_fidelity_dimensions > 0
 
     @property
     def fidelity_idx(self) -> int | None:
@@ -94,7 +98,14 @@ class _ModelContext:
 
     def get_numerical_indices(self, n_inputs: int) -> tuple[int, ...]:
         """Get the indices of the regular numerical model inputs."""
-        return tuple(i for i in range(n_inputs) if i != self.task_idx)
+        return tuple(
+            i for i in range(n_inputs) if i not in (self.task_idx, self.fidelity_idx)
+        )
+
+    def get_task_like_idxs(self, n_inputs: int) -> tuple[int, ...]:
+        return tuple(
+            i for i in range(n_inputs) if i in (self.task_idx, self.fidelity_idx)
+        )
 
 
 @define
@@ -119,7 +130,7 @@ class GaussianProcessSurrogate(Surrogate):
     supports_transfer_learning: ClassVar[bool] = True
     # See base class.
 
-    supports_multi_fidelity: ClassVar[bool] = False
+    supports_multi_fidelity: ClassVar[bool] = True
     # See base class.
 
     kernel_factory: KernelFactory = field(
@@ -195,24 +206,31 @@ class GaussianProcessSurrogate(Surrogate):
         mean_module = gpytorch.means.ConstantMean(batch_shape=batch_shape)
 
         # define the covariance module for the numeric dimensions
-        base_covar_module = self.kernel_factory(
-            context.searchspace, train_x, train_y
-        ).to_gpytorch(
-            ard_num_dims=train_x.shape[-1] - context.n_task_dimensions,
-            active_dims=numerical_idxs,
-            batch_shape=batch_shape,
-        )
+        covar_kernel = self.kernel_factory(context.searchspace, train_x, train_y)
 
-        # create GP covariance
-        if not context.is_multitask:
-            covar_module = base_covar_module
-        else:
-            task_covar_module = gpytorch.kernels.IndexKernel(
-                num_tasks=context.n_tasks,
-                active_dims=context.task_idx,
-                rank=context.n_tasks,  # TODO: make controllable
+        tot_dims = train_x.shape[-1]
+        batch_shape = train_x.shape[:-2]
+        task_like_dims = context.n_task_dimensions + context.n_fidelity_dimensions
+
+        numerical_design_idxs = context.get_numerical_indices(tot_dims)
+        numerical_task_idxs = context.get_task_like_idxs(tot_dims)
+
+        if isinstance(covar_kernel, SeperableProductKernel):
+            ard_num_dims_tup = (tot_dims - task_like_dims, task_like_dims)
+            active_dims_tup = (numerical_design_idxs, numerical_task_idxs)
+
+            covar_module = covar_kernel.to_gpytorch(
+                ard_num_dims_tup=ard_num_dims_tup,
+                active_dims_tup=active_dims_tup,
+                batch_shape=batch_shape,
             )
-            covar_module = base_covar_module * task_covar_module
+
+        else:
+            covar_module = covar_kernel.to_gpytorch(
+                ard_num_dims=tot_dims - task_like_dims,
+                active_dims=numerical_design_idxs,
+                batch_shape=batch_shape,
+            )
 
         # create GP likelihood
         noise_prior = _default_noise_factory(context.searchspace, train_x, train_y)

@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 
 @define
-class IndependentFidelityKernelFactory(DiscreteFidelityKernelFactory):
+class IndependentKernelFactory(DiscreteFidelityKernelFactory):
     """Rank 0 index kernel treating fidelities as independent."""
 
     @override
@@ -35,7 +35,7 @@ class IndependentFidelityKernelFactory(DiscreteFidelityKernelFactory):
 
 
 @define
-class IndexFidelityKernelFactory(DiscreteFidelityKernelFactory):
+class IndexKernelFactory(DiscreteFidelityKernelFactory):
     """Full rank index kernel modelling dependent fidelities."""
 
     @override
@@ -48,7 +48,10 @@ class IndexFidelityKernelFactory(DiscreteFidelityKernelFactory):
         )
 
 
-DefaultFidelityKernelFactory = IndexFidelityKernelFactory
+# Jordan MHS: leaving like this in dev branch so we can decide
+# between independent and index kernels as a default later.
+DefaultFidelityKernelFactory = IndexKernelFactory
+DefaultTaskKernelFactory = IndexKernelFactory
 
 # Collect leftover original slotted classes processed by `attrs.define`
 gc.collect()
